@@ -94,6 +94,7 @@ io.on("connection", (socket) => {
         io.to(roomId).emit("user left", username);
 
         if (Object.keys(room.users).length === 0) {
+          console.log("closing ", roomId);
           delete rooms[roomId];
         }
         break;
