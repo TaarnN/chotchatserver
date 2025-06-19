@@ -1,0 +1,4 @@
+name: chotchat-server
+routes:
+  - path: /
+    port: 3001
