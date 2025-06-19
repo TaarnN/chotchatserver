@@ -6,7 +6,7 @@ const app = express();
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "https://chotchat.vercel.app",
     methods: ["GET", "POST"],
     preflightContinue: true,
   },
