@@ -10,67 +10,98 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
     preflightContinue: true,
   },
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60 * 1000,
+    allowReconnection: true,
+  },
 });
 
-const rooms = {};
+const rooms = new Map();
 const MAX_USERS_PER_ROOM = 40;
+const isProduction = process.env.NODE_ENV === "production";
 
 io.on("connection", (socket) => {
-  console.log("✅ User connected:", socket.id);
+  if (!isProduction) console.log("✅ User connected:", socket.id);
 
-  socket.onAny((event, ...args) => {
-    console.log(`📥 Event from ${socket.id}:`, event, args);
-  });
+  if (!isProduction) {
+    socket.onAny((event, ...args) => {
+      console.log(`📥 Event from ${socket.id}:`, event, args);
+    });
+  }
 
   socket.on("join room", ({ username, roomId }) => {
     const cleanRoom = typeof roomId === "string" ? roomId.trim() : "";
     const cleanUsername =
       typeof username === "string" ? username.trim().substring(0, 20) : "";
 
-    if (!cleanRoom) {
-      socket.emit("room error", "Invalid room ID");
-      return;
-    }
-    if (!cleanUsername) {
-      socket.emit("username error", "Invalid username");
-      return;
+    if (!cleanRoom) return socket.emit("room error", "Invalid room ID");
+    if (!cleanUsername)
+      return socket.emit("username error", "Invalid username");
+
+    if (socket.data.roomId) {
+      const prevRoomId = socket.data.roomId;
+      const prevRoom = rooms.get(prevRoomId);
+
+      if (prevRoom) {
+        prevRoom.users.delete(socket.id);
+        prevRoom.usernames.delete(socket.data.username);
+
+        if (prevRoom.users.size === 0) {
+          rooms.delete(prevRoomId);
+        } else {
+          io.to(prevRoomId).emit("user count", prevRoom.users.size);
+          io.to(prevRoomId).emit("user left", socket.data.username);
+        }
+
+        socket.leave(prevRoomId);
+      }
     }
 
-    if (!rooms[cleanRoom]) {
-      rooms[cleanRoom] = { users: {}, usernames: new Set() };
+    let room = rooms.get(cleanRoom);
+    if (!room) {
+      room = {
+        users: new Map(),
+        usernames: new Set(),
+      };
+      rooms.set(cleanRoom, room);
     }
-    const room = rooms[cleanRoom];
 
-    if (Object.keys(room.users).length >= MAX_USERS_PER_ROOM) {
-      socket.emit("room full");
-      return;
+    if (room.users.size >= MAX_USERS_PER_ROOM) {
+      return socket.emit("room full");
     }
 
     if (room.usernames.has(cleanUsername)) {
-      socket.emit("username error", "Username is taken in this room");
-      return;
+      return socket.emit("username error", "Username is taken in this room");
     }
 
-    room.users[socket.id] = { id: socket.id, username: cleanUsername };
+    room.users.set(socket.id, {
+      id: socket.id,
+      username: cleanUsername,
+    });
     room.usernames.add(cleanUsername);
     socket.join(cleanRoom);
+
+    socket.data.roomId = cleanRoom;
+    socket.data.username = cleanUsername;
 
     socket.emit("username set", cleanUsername);
     socket.emit("room set", cleanRoom);
 
-    io.to(cleanRoom).emit("user count", Object.keys(room.users).length);
+    io.to(cleanRoom).emit("user count", room.users.size);
     io.to(cleanRoom).emit("user joined", cleanUsername);
   });
 
   socket.on("chat message", (content) => {
-    const roomId = Array.from(socket.rooms).find((rid) => rid !== socket.id);
+    if (typeof content !== "string" || !content.trim()) return;
+
+    const roomId = socket.data.roomId;
     if (!roomId) return;
-    const room = rooms[roomId];
+
+    const room = rooms.get(roomId);
     if (!room) return;
 
-    const user = room.users[socket.id];
+    const user = room.users.get(socket.id);
     if (!user) return;
-    if (typeof content !== "string" || !content.trim()) return;
 
     const payload = {
       id: `${socket.id}-${Date.now()}`,
@@ -78,29 +109,33 @@ io.on("connection", (socket) => {
       senderId: socket.id,
       username: user.username,
     };
+
     io.to(roomId).emit("chat message", payload);
   });
 
   socket.on("disconnect", () => {
-    for (const [roomId, room] of Object.entries(rooms)) {
-      const user = room.users[socket.id];
-      if (user) {
-        const { username } = user;
-        delete room.users[socket.id];
-        room.usernames.delete(username);
-        socket.leave(roomId);
+    const roomId = socket.data.roomId;
+    if (!roomId) return;
 
-        io.to(roomId).emit("user count", Object.keys(room.users).length);
-        io.to(roomId).emit("user left", username);
+    const room = rooms.get(roomId);
+    if (!room) return;
 
-        if (Object.keys(room.users).length === 0) {
-          console.log("closing ", roomId);
-          delete rooms[roomId];
-        }
-        break;
-      }
+    const username = socket.data.username;
+    room.users.delete(socket.id);
+    room.usernames.delete(username);
+
+    if (room.users.size === 0) {
+      rooms.delete(roomId);
+    } else {
+      io.to(roomId).emit("user count", room.users.size);
+      io.to(roomId).emit("user left", username);
     }
-    console.log("User disconnected:", socket.id);
+
+    if (!isProduction) console.log("User disconnected:", socket.id);
+  });
+
+  socket.on("error", (err) => {
+    if (!isProduction) console.error("Socket error:", err);
   });
 });
 
