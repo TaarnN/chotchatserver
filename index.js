@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import fetch from "node-fetch";
 
 const app = express();
 const server = createServer(app);
@@ -35,8 +36,7 @@ io.on("connection", (socket) => {
       typeof username === "string" ? username.trim().substring(0, 20) : "";
 
     if (!cleanRoom) return socket.emit("room error", "Invalid room ID");
-    if (!cleanUsername)
-      return socket.emit("username error", "Invalid username");
+    if (!cleanUsername) return socket.emit("username error", "Invalid username");
 
     if (socket.data.roomId) {
       const prevRoomId = socket.data.roomId;
@@ -51,6 +51,10 @@ io.on("connection", (socket) => {
         } else {
           io.to(prevRoomId).emit("user count", prevRoom.users.size);
           io.to(prevRoomId).emit("user left", socket.data.username);
+          io.to(prevRoomId).emit(
+            "room users",
+            Array.from(prevRoom.usernames)
+          );
         }
 
         socket.leave(prevRoomId);
@@ -74,10 +78,7 @@ io.on("connection", (socket) => {
       return socket.emit("username error", "Username is taken in this room");
     }
 
-    room.users.set(socket.id, {
-      id: socket.id,
-      username: cleanUsername,
-    });
+    room.users.set(socket.id, { id: socket.id, username: cleanUsername });
     room.usernames.add(cleanUsername);
     socket.join(cleanRoom);
 
@@ -89,6 +90,23 @@ io.on("connection", (socket) => {
 
     io.to(cleanRoom).emit("user count", room.users.size);
     io.to(cleanRoom).emit("user joined", cleanUsername);
+    io.to(cleanRoom).emit("room users", Array.from(room.usernames));
+  });
+
+  socket.on("typing", () => {
+    const roomId = socket.data.roomId;
+    const username = socket.data.username;
+    if (roomId && username) {
+      io.to(roomId).emit("typing", username);
+    }
+  });
+
+  socket.on("stop typing", () => {
+    const roomId = socket.data.roomId;
+    const username = socket.data.username;
+    if (roomId && username) {
+      io.to(roomId).emit("stop typing", username);
+    }
   });
 
   socket.on("chat message", (content) => {
@@ -113,6 +131,32 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("chat message", payload);
   });
 
+  socket.on("edit message", ({ messageId, newContent }) => {
+    const roomId = socket.data.roomId;
+    if (roomId) {
+      io.to(roomId).emit("message edited", { messageId, newContent });
+    }
+  });
+
+  socket.on("delete message", ({ messageId }) => {
+    const roomId = socket.data.roomId;
+    if (roomId) {
+      io.to(roomId).emit("message deleted", { messageId });
+    }
+  });
+
+  socket.on("link preview", async ({ url, tempId }) => {
+    try {
+      const res = await fetch(url);
+      const html = await res.text();
+      const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+      const title = titleMatch ? titleMatch[1] : url;
+      socket.emit("link preview", { tempId, preview: { url, title } });
+    } catch (err) {
+      socket.emit("link preview", { tempId, preview: { url, title: url } });
+    }
+  });
+
   socket.on("disconnect", () => {
     const roomId = socket.data.roomId;
     if (!roomId) return;
@@ -129,6 +173,7 @@ io.on("connection", (socket) => {
     } else {
       io.to(roomId).emit("user count", room.users.size);
       io.to(roomId).emit("user left", username);
+      io.to(roomId).emit("room users", Array.from(room.usernames));
     }
 
     if (!isProduction) console.log("User disconnected:", socket.id);
