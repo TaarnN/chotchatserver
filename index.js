@@ -118,6 +118,9 @@ io.on("connection", (socket) => {
       historyParams.push(entry);
     });
 
+    const controller = new AbortController();
+    let timeout;
+
     try {
       const url = new URL("https://ttaarrnn-chotchataispace.hf.space/chat");
       historyParams.forEach((entry) => {
@@ -125,17 +128,14 @@ io.on("connection", (socket) => {
       });
       console.log("URL: ", url.toString());
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
+      timeout = setTimeout(() => controller.abort(), 20000);
 
       const response = await fetch(url.toString(), {
         signal: controller.signal,
       });
       clearTimeout(timeout);
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const data = await response.json();
       const aiReply = data.reply || "";
