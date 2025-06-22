@@ -134,6 +134,7 @@ io.on("connection", (socket) => {
         signal: controller.signal,
       });
       clearTimeout(timeout);
+      const text = await response.text();
       console.log("Fetch status:", response.status);
       console.log("Fetch body:", text);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
