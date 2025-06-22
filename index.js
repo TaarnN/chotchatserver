@@ -2,6 +2,7 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import fetch from "node-fetch";
+import { URL } from "url";
 
 const app = express();
 const server = createServer(app);
@@ -36,7 +37,8 @@ io.on("connection", (socket) => {
       typeof username === "string" ? username.trim().substring(0, 20) : "";
 
     if (!cleanRoom) return socket.emit("room error", "Invalid room ID");
-    if (!cleanUsername) return socket.emit("username error", "Invalid username");
+    if (!cleanUsername)
+      return socket.emit("username error", "Invalid username");
 
     if (socket.data.roomId) {
       const prevRoomId = socket.data.roomId;
@@ -51,10 +53,7 @@ io.on("connection", (socket) => {
         } else {
           io.to(prevRoomId).emit("user count", prevRoom.users.size);
           io.to(prevRoomId).emit("user left", socket.data.username);
-          io.to(prevRoomId).emit(
-            "room users",
-            Array.from(prevRoom.usernames)
-          );
+          io.to(prevRoomId).emit("room users", Array.from(prevRoom.usernames));
         }
 
         socket.leave(prevRoomId);
@@ -91,6 +90,58 @@ io.on("connection", (socket) => {
     io.to(cleanRoom).emit("user count", room.users.size);
     io.to(cleanRoom).emit("user joined", cleanUsername);
     io.to(cleanRoom).emit("room users", Array.from(room.usernames));
+  });
+
+  socket.on("AI request", async (messages) => {
+    const roomId = socket.data.roomId;
+    if (!roomId) return;
+
+    if (!Array.isArray(messages)) {
+      return socket.emit("AI error", "Invalid messages format");
+    }
+
+    const historyParams = [];
+    const maxEntries = 8;
+
+    messages.slice(-maxEntries).forEach((msg) => {
+      if (
+        !msg ||
+        typeof msg.username !== "string" ||
+        typeof msg.content !== "string"
+      )
+        return;
+
+      let entry = `(${msg.username})${msg.content}`;
+      if (entry.length > 1000) {
+        entry = entry.substring(0, 1000);
+      }
+      historyParams.push(entry);
+    });
+
+    try {
+      const url = new URL("https://ttaarrnn-chotchataispace.hf.space/chat");
+      historyParams.forEach((entry) => {
+        url.searchParams.append("h", entry);
+      });
+
+      const response = await fetch(url.toString());
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data = await response.json();
+      const aiReply = data.reply || "";
+
+      const payload = {
+        id: `AI-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        content: aiReply,
+        senderId: "AI",
+        username: "AI",
+      };
+
+      io.to(roomId).emit("chat message", payload);
+    } catch (err) {
+      console.error("AI request failed:", err);
+      socket.emit("AI error", "Failed to get AI response");
+    }
   });
 
   socket.on("typing", () => {
