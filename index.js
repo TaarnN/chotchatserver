@@ -123,10 +123,19 @@ io.on("connection", (socket) => {
       historyParams.forEach((entry) => {
         url.searchParams.append("h", entry);
       });
-      console.log("URL: ", url.toString())
+      console.log("URL: ", url.toString());
 
-      const response = await fetch(url.toString());
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      const response = await fetch(url.toString(), {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
 
       const data = await response.json();
       const aiReply = data.reply || "";
@@ -140,6 +149,7 @@ io.on("connection", (socket) => {
 
       io.to(roomId).emit("chat message", payload);
     } catch (err) {
+      clearTimeout(timeout);
       console.error("AI request failed:", err);
       socket.emit("AI error", "Failed to get AI response");
     }
