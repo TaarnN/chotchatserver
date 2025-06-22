@@ -123,6 +123,7 @@ io.on("connection", (socket) => {
       historyParams.forEach((entry) => {
         url.searchParams.append("h", entry);
       });
+      console.log("URL: ", url.toString())
 
       const response = await fetch(url.toString());
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
