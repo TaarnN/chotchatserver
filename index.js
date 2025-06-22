@@ -101,7 +101,7 @@ io.on("connection", (socket) => {
     }
 
     const historyParams = [];
-    const maxEntries = 8;
+    const maxEntries = 10;
 
     messages.slice(-maxEntries).forEach((msg) => {
       if (
