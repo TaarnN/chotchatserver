@@ -120,7 +120,7 @@ io.on("connection", (socket) => {
 
     const controller = new AbortController();
     let timeout;
-
+    io.to(roomId).emit("typing", "AI");
     try {
       const url = new URL("https://ttaarrnn-chotchataispace.hf.space/chat");
       historyParams.forEach((entry) => {
@@ -152,6 +152,8 @@ io.on("connection", (socket) => {
       clearTimeout(timeout);
       console.error("AI request failed:", err);
       socket.emit("AI error", "Failed to get AI response");
+    } finally {
+      io.to(roomId).emit("stop typing", "AI");
     }
   });
 
