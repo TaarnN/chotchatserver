@@ -132,7 +132,7 @@ io.on("connection", (socket) => {
 
       const response = await fetch(url.toString(), {
         signal: controller.signal,
-      });
+      }); 
       clearTimeout(timeout);
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
