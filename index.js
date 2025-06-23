@@ -1,7 +1,8 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { io as ioClient } from "socket.io-client";
+import fetch from "node-fetch";
+import { URL } from "url";
 
 const app = express();
 const server = createServer(app);
@@ -9,30 +10,12 @@ const io = new Server(server, {
   cors: {
     origin: "https://chotchat.vercel.app",
     methods: ["GET", "POST"],
+    preflightContinue: true,
   },
   connectionStateRecovery: {
     maxDisconnectionDuration: 2 * 60 * 1000,
+    allowReconnection: true,
   },
-});
-
-// Connect to Hugging Face Socket.IO server
-const hfSocket = ioClient("https://ttaarrnn-chotchatnotwo.hf.space", {
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000,
-  transports: ["websocket"],
-});
-
-hfSocket.on("connect", () => {
-  console.log("✅ Connected to Hugging Face Socket.IO");
-});
-
-hfSocket.on("disconnect", () => {
-  console.log("❌ Disconnected from Hugging Face");
-});
-
-hfSocket.on("connect_error", (err) => {
-  console.error("Hugging Face connection error:", err);
 });
 
 const rooms = new Map();
@@ -113,41 +96,63 @@ io.on("connection", (socket) => {
     const roomId = socket.data.roomId;
     if (!roomId) return;
 
+    if (!Array.isArray(messages)) {
+      return socket.emit("AI error", "Invalid messages format");
+    }
+
+    const historyParams = [];
+    const maxEntries = 10;
+
+    messages.slice(-maxEntries).forEach((msg) => {
+      if (
+        !msg ||
+        typeof msg.username !== "string" ||
+        typeof msg.content !== "string"
+      )
+        return;
+
+      let entry = `(${msg.username})${msg.content}`;
+      if (entry.length > 1000) {
+        entry = entry.substring(0, 1000);
+      }
+      historyParams.push(entry);
+    });
+
+    const controller = new AbortController();
+    let timeout;
+    io.to(roomId).emit("typing", "AI");
     try {
-      io.to(roomId).emit("typing", "AI");
-      
-      // Prepare history parameters
-      const historyParams = messages.slice(-10).map(msg => {
-        const prefix = msg.username === "AI" ? "(AI)" : `(${msg.username})`;
-        return `${prefix}${msg.content}`;
+      const url = new URL("https://ttaarrnn-chotchataispace.hf.space/chat");
+      historyParams.forEach((entry) => {
+        url.searchParams.append("h", entry);
       });
+      console.log("URL: ", url.toString());
 
-      // Create timeout fallback (40 seconds)
-      const timeout = setTimeout(() => {
-        socket.emit("AI_error", "AI response timed out");
-        io.to(roomId).emit("stop typing", "AI");
-      }, 40000);
+      timeout = setTimeout(() => controller.abort(), 20000);
 
-      // Send request to Hugging Face
-      hfSocket.emit("AI_request", { historyParams }, (response) => {
-        clearTimeout(timeout);
-        
-        if (response && response.reply) {
-          const payload = {
-            id: `AI-${Date.now()}`,
-            content: response.reply,
-            senderId: "AI",
-            username: "AI",
-          };
-          io.to(roomId).emit("chat message", payload);
-        } else {
-          socket.emit("AI_error", "Invalid AI response");
-        }
-        io.to(roomId).emit("stop typing", "AI");
+      const response = await fetch(url.toString(), {
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data = await response.json();
+      const aiReply = data.reply || "";
+
+      const payload = {
+        id: `AI-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        content: aiReply,
+        senderId: "AI",
+        username: "AI",
+      };
+
+      io.to(roomId).emit("chat message", payload);
     } catch (err) {
+      clearTimeout(timeout);
       console.error("AI request failed:", err);
-      socket.emit("AI_error", "AI processing error");
+      socket.emit("AI error", "Failed to get AI response");
+    } finally {
       io.to(roomId).emit("stop typing", "AI");
     }
   });
