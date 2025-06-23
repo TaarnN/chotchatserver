@@ -122,7 +122,7 @@ io.on("connection", (socket) => {
     let timeout;
     io.to(roomId).emit("typing", "AI");
     try {
-      const url = new URL("https://ttaarrnn-chotchataispace.hf.space/chat");
+      const url = new URL("https://ttaarrnn-chotchatnotwo.hf.space/chat");
       historyParams.forEach((entry) => {
         url.searchParams.append("h", entry);
       });
