@@ -65,6 +65,7 @@ io.on("connection", (socket) => {
       room = {
         users: new Map(),
         usernames: new Set(),
+        isAITyping: false,
       };
       rooms.set(cleanRoom, room);
     }
@@ -95,14 +96,21 @@ io.on("connection", (socket) => {
   socket.on("AI request", async (messages) => {
     const roomId = socket.data.roomId;
     if (!roomId) return;
-
+  
+    const room = rooms.get(roomId);
+    if (!room) return;
+  
+    if (room.isAITyping) {
+      return socket.emit("AI error", "AI is currently typing");
+    }
+  
     if (!Array.isArray(messages)) {
       return socket.emit("AI error", "Invalid messages format");
     }
-
+  
     const historyParams = [];
     const maxEntries = 10;
-
+  
     messages.slice(-maxEntries).forEach((msg) => {
       if (
         !msg ||
@@ -110,52 +118,55 @@ io.on("connection", (socket) => {
         typeof msg.content !== "string"
       )
         return;
-
-      let entry = `(${msg.username})${msg.content}`;
+  
+      let entry = `(from ${msg.username})${msg.content}`;
       if (entry.length > 1000) {
         entry = entry.substring(0, 1000);
       }
       historyParams.push(entry);
     });
-
+  
     const controller = new AbortController();
     let timeout;
+    room.isAITyping = true; // 👈 ตั้งให้ AI กำลังพิมพ์
     io.to(roomId).emit("typing", "AI");
+  
     try {
       const url = new URL("https://ttaarrnn-chotchatnotwo.hf.space/chat");
       historyParams.forEach((entry) => {
         url.searchParams.append("h", entry);
       });
-      console.log("URL: ", url.toString());
-
+  
       timeout = setTimeout(() => controller.abort(), 20000);
-
+  
       const response = await fetch(url.toString(), {
         signal: controller.signal,
-      }); 
+      });
       clearTimeout(timeout);
-
+  
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
+  
       const data = await response.json();
       const aiReply = data.reply || "";
-
+  
       const payload = {
         id: `AI-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         content: aiReply,
         senderId: "AI",
         username: "AI",
       };
-
+  
       io.to(roomId).emit("chat message", payload);
     } catch (err) {
       clearTimeout(timeout);
       console.error("AI request failed:", err);
       socket.emit("AI error", "Failed to get AI response");
     } finally {
+      room.isAITyping = false; // 👈 ตั้งให้ AI หยุดพิมพ์
       io.to(roomId).emit("stop typing", "AI");
     }
   });
+  
 
   socket.on("typing", () => {
     const roomId = socket.data.roomId;
