@@ -119,7 +119,7 @@ io.on("connection", (socket) => {
       )
         return;
   
-      let entry = `(from ${msg.username})${msg.content}`;
+      let entry = `(${msg.username})${msg.content}`;
       if (entry.length > 1000) {
         entry = entry.substring(0, 1000);
       }
